@@ -640,13 +640,12 @@ function deg2rad(deg) {
   return (deg * Math.PI) / 180;
 }
 
-function azElToCartesian(azDeg, elDeg) {
-  const theta = deg2rad(azDeg);
-  const phi = deg2rad(90 - elDeg);
-  const r = 1;
-  const x = r * Math.sin(phi) * Math.cos(theta);
-  const y = r * Math.sin(phi) * Math.sin(theta);
-  const z = r * Math.cos(phi);
+function azElToUnitSphereXYZ(azDeg, elDeg) {
+  const az = deg2rad(azDeg);
+  const el = deg2rad(elDeg);
+  const x = Math.cos(el) * Math.cos(az);
+  const y = Math.cos(el) * Math.sin(az);
+  const z = Math.sin(el);
   return { x, y, z };
 }
 
@@ -726,28 +725,150 @@ function drawPolar3D() {
   const el = ui.polar3d;
   if (!el || typeof Plotly === "undefined") return;
 
-  const ok = { x: [], y: [], z: [] };
-  const bad = { x: [], y: [], z: [] };
+  const ok = { x: [], y: [], z: [], customdata: [] };
+  const bad = { x: [], y: [], z: [], customdata: [] };
 
   const rows = getActiveRowsNormalized();
   rows.forEach((p) => {
-    const c = azElToCartesian(p.az, p.el);
+    const c = azElToUnitSphereXYZ(p.az, p.el);
+    const timeStr = new Date(p.t).toLocaleString();
+    const cd = [p.az, p.el, p.status, timeStr];
     if (p.status === "OK") {
-      ok.x.push(c.x); ok.y.push(c.y); ok.z.push(c.z);
+      ok.x.push(c.x); ok.y.push(c.y); ok.z.push(c.z); ok.customdata.push(cd);
     } else {
-      bad.x.push(c.x); bad.y.push(c.y); bad.z.push(c.z);
+      bad.x.push(c.x); bad.y.push(c.y); bad.z.push(c.z); bad.customdata.push(cd);
     }
   });
 
+  // Unit sphere surface
+  const uSteps = 50;
+  const vSteps = 25;
+  const xs = [];
+  const ys = [];
+  const zs = [];
+  for (let i = 0; i <= vSteps; i++) {
+    const v = -Math.PI / 2 + (i / vSteps) * Math.PI;
+    const rowX = [];
+    const rowY = [];
+    const rowZ = [];
+    for (let j = 0; j <= uSteps; j++) {
+      const u = (j / uSteps) * Math.PI * 2;
+      rowX.push(Math.cos(v) * Math.cos(u));
+      rowY.push(Math.cos(v) * Math.sin(u));
+      rowZ.push(Math.sin(v));
+    }
+    xs.push(rowX);
+    ys.push(rowY);
+    zs.push(rowZ);
+  }
+
+  const gridColor = "rgba(255,255,255,.12)";
+
+  const makeCircleEl = (elDeg) => {
+    const azList = [];
+    for (let a = 0; a <= 360; a += 5) azList.push(a);
+    const x = [], y = [], z = [];
+    azList.forEach((a) => {
+      const c = azElToUnitSphereXYZ(a, elDeg);
+      x.push(c.x); y.push(c.y); z.push(c.z);
+    });
+    return { x, y, z };
+  };
+
+  const makeMeridianAz = (azDeg) => {
+    const elList = [];
+    for (let e = -90; e <= 90; e += 5) elList.push(e);
+    const x = [], y = [], z = [];
+    elList.forEach((e) => {
+      const c = azElToUnitSphereXYZ(azDeg, e);
+      x.push(c.x); y.push(c.y); z.push(c.z);
+    });
+    return { x, y, z };
+  };
+
+  const equator = makeCircleEl(0);
+  const el30 = makeCircleEl(30);
+  const el60 = makeCircleEl(60);
+  const az0 = makeMeridianAz(0);
+  const az90 = makeMeridianAz(90);
+
   const data = [
+    {
+      type: "surface",
+      x: xs,
+      y: ys,
+      z: zs,
+      opacity: 0.1,
+      showscale: false,
+      colorscale: [[0, "rgba(255,255,255,0.12)"], [1, "rgba(255,255,255,0.12)"]],
+      hoverinfo: "skip",
+      name: "Sphere",
+    },
+    {
+      type: "scatter3d",
+      mode: "lines",
+      x: equator.x,
+      y: equator.y,
+      z: equator.z,
+      line: { color: gridColor, width: 2 },
+      hoverinfo: "skip",
+      name: "Equator",
+      showlegend: false,
+    },
+    {
+      type: "scatter3d",
+      mode: "lines",
+      x: el30.x,
+      y: el30.y,
+      z: el30.z,
+      line: { color: gridColor, width: 1 },
+      hoverinfo: "skip",
+      name: "el30",
+      showlegend: false,
+    },
+    {
+      type: "scatter3d",
+      mode: "lines",
+      x: el60.x,
+      y: el60.y,
+      z: el60.z,
+      line: { color: gridColor, width: 1 },
+      hoverinfo: "skip",
+      name: "el60",
+      showlegend: false,
+    },
+    {
+      type: "scatter3d",
+      mode: "lines",
+      x: az0.x,
+      y: az0.y,
+      z: az0.z,
+      line: { color: gridColor, width: 1 },
+      hoverinfo: "skip",
+      name: "az0",
+      showlegend: false,
+    },
+    {
+      type: "scatter3d",
+      mode: "lines",
+      x: az90.x,
+      y: az90.y,
+      z: az90.z,
+      line: { color: gridColor, width: 1 },
+      hoverinfo: "skip",
+      name: "az90",
+      showlegend: false,
+    },
     {
       type: "scatter3d",
       mode: "markers",
       x: ok.x,
       y: ok.y,
       z: ok.z,
+      customdata: ok.customdata,
       marker: { size: 4, color: "#22c55e", line: { color: "rgba(0,0,0,.6)", width: 1 } },
       name: "OK",
+      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>",
     },
     {
       type: "scatter3d",
@@ -755,24 +876,12 @@ function drawPolar3D() {
       x: bad.x,
       y: bad.y,
       z: bad.z,
+      customdata: bad.customdata,
       marker: { size: 4, color: "#ef4444", line: { color: "rgba(0,0,0,.6)", width: 1 } },
       name: "NOT OK",
+      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>",
     },
   ];
-
-  const ranges = getRanges();
-  const gridStep = ranges.step <= 5 ? 5 : 10;
-  const azTicks = [];
-  for (let a = -90; a <= 90 + 1e-9; a += gridStep) azTicks.push(Math.round(a));
-  const elMin = Math.min(ranges.elMin, ranges.elMax);
-  const elTicks = [];
-  for (let e = Math.ceil(elMin / gridStep) * gridStep; e <= 90 + 1e-9; e += gridStep) elTicks.push(Math.round(e));
-  if (!elTicks.includes(elMin)) elTicks.unshift(elMin);
-
-  const azTickVals = azTicks.map(d => d / 90);
-  const azTickText = azTicks.map(d => `${d}°`);
-  const elTickVals = elTicks.map(d => d / 90);
-  const elTickText = elTicks.map(d => `${d}°`);
 
   const layout = {
     paper_bgcolor: "rgba(0,0,0,0)",
@@ -780,39 +889,33 @@ function drawPolar3D() {
     margin: { l: 0, r: 0, b: 0, t: 0 },
     scene: {
       xaxis: {
-        title: "Azimuth (deg)",
+        title: "X",
         showgrid: true,
         zeroline: true,
         showticklabels: true,
-        range: [-1, 1],
-        tickvals: azTickVals,
-        ticktext: azTickText,
+        range: [-1.1, 1.1],
         gridcolor: "rgba(255,255,255,.08)",
         zerolinecolor: "rgba(255,255,255,.18)",
         tickfont: { color: "#e7eef6" },
         titlefont: { color: "#e7eef6" },
       },
       yaxis: {
-        title: "Azimuth (deg)",
+        title: "Y",
         showgrid: true,
         zeroline: true,
         showticklabels: true,
-        range: [-1, 1],
-        tickvals: azTickVals,
-        ticktext: azTickText,
+        range: [-1.1, 1.1],
         gridcolor: "rgba(255,255,255,.08)",
         zerolinecolor: "rgba(255,255,255,.18)",
         tickfont: { color: "#e7eef6" },
         titlefont: { color: "#e7eef6" },
       },
       zaxis: {
-        title: "Elevation (deg)",
+        title: "Z",
         showgrid: true,
         zeroline: true,
         showticklabels: true,
-        range: [-1, 1],
-        tickvals: elTickVals,
-        ticktext: elTickText,
+        range: [-1.1, 1.1],
         gridcolor: "rgba(255,255,255,.08)",
         zerolinecolor: "rgba(255,255,255,.18)",
         tickfont: { color: "#e7eef6" },
