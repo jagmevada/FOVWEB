@@ -35,6 +35,8 @@ const ui = {
   progressBar: $("progressBar"),
   progressText: $("progressText"),
 
+  polarCanvas: $("polarCanvas"),
+
   log: $("log"),
   rows: $("rows"),
 };
@@ -102,6 +104,7 @@ function updateStatus() {
   ui.progressText.textContent = `${Math.min(100, Math.max(0, progress))}%`;
 
   renderTable();
+  drawPolar();
 }
 
 function renderTable() {
@@ -340,6 +343,94 @@ function exportCSV() {
 // Helpers
 // =======================
 
+function resizeCanvasToDisplaySize(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(rect.width * dpr));
+  const height = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    return true;
+  }
+  return false;
+}
+
+function deg2rad(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+function elevationToRadius(elevation, maxRadiusPx, maxRadiusDeg) {
+  const rDeg = 90 - elevation;
+  return (rDeg / maxRadiusDeg) * maxRadiusPx;
+}
+
+function drawPolar() {
+  const canvas = ui.polarCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  resizeCanvasToDisplaySize(canvas);
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2;
+  const cy = h / 2;
+  const pad = 14 * dpr;
+  const maxRadiusPx = Math.max(1, Math.min(w, h) / 2 - pad);
+
+  const ranges = getRanges();
+  const elMin = Math.min(ranges.elMin, ranges.elMax);
+  const maxRadiusDeg = elMin < 0 ? 90 - elMin : 90;
+
+  // Rings
+  const ringEls = [90, 60, 30, 0];
+  if (elMin < 0) ringEls.push(elMin);
+
+  ctx.strokeStyle = "rgba(255,255,255,.10)";
+  ctx.lineWidth = 1 * dpr;
+  ringEls.forEach((el) => {
+    const r = elevationToRadius(el, maxRadiusPx, maxRadiusDeg);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Radial lines
+  const azLines = [-90, -45, 0, 45, 90];
+  ctx.strokeStyle = "rgba(255,255,255,.10)";
+  azLines.forEach((az) => {
+    const t = deg2rad(az);
+    const x = cx + maxRadiusPx * Math.cos(t);
+    const y = cy - maxRadiusPx * Math.sin(t);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  });
+
+  // Points
+  const dotR = 4 * dpr;
+  const outline = "rgba(0,0,0,.6)";
+  state.captured.forEach((p) => {
+    const t = deg2rad(p.az);
+    const r = elevationToRadius(p.el, maxRadiusPx, maxRadiusDeg);
+    const x = cx + r * Math.cos(t);
+    const y = cy - r * Math.sin(t);
+    ctx.beginPath();
+    ctx.fillStyle = p.status === "OK" ? "#22c55e" : "#ef4444";
+    ctx.arc(x, y, dotR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1 * dpr;
+    ctx.stroke();
+  });
+}
+
 function getRanges() {
   const azMin = clampInt(ui.azMin.value, -90);
   const azMax = clampInt(ui.azMax.value, 90);
@@ -396,6 +487,10 @@ ui.btnOk.addEventListener("click", () => {
 ui.btnNotOk.addEventListener("click", () => {
   if (!state.points.length) rebuildPoints();
   capture("NOT_OK");
+});
+
+window.addEventListener("resize", () => {
+  drawPolar();
 });
 
 ui.btnNext.addEventListener("click", async () => {
