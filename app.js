@@ -30,6 +30,7 @@ const ui = {
   stAz: $("stAz"),
   stEl: $("stEl"),
   stIndex: $("stIndex"),
+  stSessionId: $("stSessionId"),
   stOk: $("stOk"),
   stBad: $("stBad"),
   progressBar: $("progressBar"),
@@ -49,6 +50,10 @@ const state = {
   idx: 0,           // current point index
   dwellMs: 250,
   captured: [],     // {az, el, status, t}
+  currentSessionId: "",
+  lastTelemetryId: null,
+  lastTelemetry: null,
+  fovRows: [],
 };
 
 function nowISO() {
@@ -94,9 +99,11 @@ function updateStatus() {
   ui.stAz.textContent = `${p.az}°`;
   ui.stEl.textContent = `${p.el}°`;
   ui.stIndex.textContent = `${Math.min(state.idx + 1, total)} / ${total}`;
+  ui.stSessionId.textContent = state.currentSessionId ? state.currentSessionId.substring(0, 8) : "—";
 
-  const okCount = state.captured.filter(x => x.status === "OK").length;
-  const badCount = state.captured.filter(x => x.status === "NOT_OK").length;
+  const rows = getActiveRowsNormalized();
+  const okCount = rows.filter(x => x.status === "OK").length;
+  const badCount = rows.filter(x => x.status === "NOT_OK").length;
   ui.stOk.textContent = String(okCount);
   ui.stBad.textContent = String(badCount);
 
@@ -113,11 +120,12 @@ function renderTable() {
   ui.rows.innerHTML = "";
   const frag = document.createDocumentFragment();
 
-  state.captured.slice().reverse().forEach((r, i) => {
+  const rows = getActiveRowsNormalized();
+  rows.slice().reverse().forEach((r, i) => {
     const tr = document.createElement("tr");
     const badge = badgeHTML(r.status);
     tr.innerHTML = `
-      <td>${state.captured.length - i}</td>
+      <td>${rows.length - i}</td>
       <td>${r.az}</td>
       <td>${r.el}</td>
       <td>${badge}</td>
@@ -170,46 +178,20 @@ async function sendMoveCommand(az, el) {
   }
 
   if (mode === "supabase") {
-    // Minimal REST insert into a "commands" table
-    // You can adapt columns to match your existing schema.
     const sbUrl = ui.sbUrl.value.trim();
     const sbKey = ui.sbKey.value.trim();
-    const target = ui.sbCmdTarget.value.trim() || "commands";
-    const deviceId = ui.sbDeviceId.value.trim() || "fov_rig_1";
-
     if (!sbUrl || !sbKey) {
       log("Supabase mode selected, but URL/Key missing.");
       return;
     }
 
-    const endpoint = `${sbUrl.replace(/\/+$/,"")}/rest/v1/${encodeURIComponent(target)}`;
-
-    // Suggested row format (customize to your schema):
-    // { device_id, cmd, az_deg, el_deg, created_at }
-    const payload = [{
-      device_id: deviceId,
-      cmd: "MOVE",
-      az_deg: az,
-      el_deg: el,
-      created_at: new Date().toISOString()
-    }];
-
     try {
-      const r = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": sbKey,
-          "Authorization": `Bearer ${sbKey}`,
-          "Prefer": "return=minimal"
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!r.ok) {
-        const txt = await r.text().catch(() => "");
-        throw new Error(`HTTP ${r.status} ${txt}`);
+      if (!state.currentSessionId) {
+        await createSession(getRanges());
       }
-      log(`Inserted Supabase cmd MOVE az=${az}, el=${el}`);
+      setCaptureEnabled(false);
+      await insertMoveCommand(az, el);
+      await pollTelemetryAck();
     } catch (e) {
       log(`Supabase cmd insert failed: ${e.message}`);
     }
@@ -267,18 +249,32 @@ async function runLoop() {
   }
 }
 
-function capture(status) {
+async function capture(status) {
   const p = currentPoint();
 
-  // update existing capture if already captured this point
-  const key = `${p.az}|${p.el}`;
-  const existing = state.captured.findIndex(x => `${x.az}|${x.el}` === key);
-  const row = { az: p.az, el: p.el, status, t: Date.now() };
+  if (isSupabaseMode()) {
+    try {
+      if (!state.lastTelemetry) {
+        log("No telemetry available for capture.");
+        return;
+      }
+      await insertFovData(status);
+      log(`Captured ${status} at az=${state.lastTelemetry?.az_actual}, el=${state.lastTelemetry?.el_actual}`);
+    } catch (e) {
+      log(`Supabase capture failed: ${e.message}`);
+      return;
+    }
+  } else {
+    // update existing capture if already captured this point
+    const key = `${p.az}|${p.el}`;
+    const existing = state.captured.findIndex(x => `${x.az}|${x.el}` === key);
+    const row = { az: p.az, el: p.el, status, t: Date.now() };
 
-  if (existing >= 0) state.captured[existing] = row;
-  else state.captured.push(row);
+    if (existing >= 0) state.captured[existing] = row;
+    else state.captured.push(row);
 
-  log(`Captured ${status} at az=${p.az}, el=${p.el}`);
+    log(`Captured ${status} at az=${p.az}, el=${p.el}`);
+  }
 
   // auto-advance after capture
   if (state.idx < state.points.length - 1) {
@@ -314,6 +310,23 @@ function download(filename, text, mime = "text/plain") {
 }
 
 function exportJSON() {
+  if (isSupabaseMode()) {
+    const payload = {
+      meta: {
+        created_at: nowISO(),
+        ranges: getRanges(),
+        session_id: state.currentSessionId,
+        device_id: ui.sbDeviceId.value.trim() || "fov_rig_1",
+        total_points: state.points.length,
+        captured_points: (state.fovRows || []).length
+      },
+      points: state.points,
+      fov_data: state.fovRows || []
+    };
+    download(`fov_map_${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
+    return;
+  }
+
   const payload = {
     meta: {
       created_at: nowISO(),
@@ -328,6 +341,15 @@ function exportJSON() {
 }
 
 function exportCSV() {
+  if (isSupabaseMode()) {
+    const lines = ["index,session_id,device_id,az_deg,el_deg,result,created_at"];
+    (state.fovRows || []).forEach((r, i) => {
+      lines.push(`${i + 1},${r.session_id},${r.device_id},${r.az_deg},${r.el_deg},${r.result},${r.created_at}`);
+    });
+    download(`fov_map_${Date.now()}.csv`, lines.join("\n"), "text/csv");
+    return;
+  }
+
   const lines = ["index,az_deg,el_deg,status,timestamp_iso"];
   const map = new Map(state.captured.map(r => [`${r.az}|${r.el}`, r]));
 
@@ -344,6 +366,171 @@ function exportCSV() {
 // =======================
 // Helpers
 // =======================
+
+function isSupabaseMode() {
+  return ui.deviceMode.value === "supabase";
+}
+
+function setCaptureEnabled(enabled) {
+  ui.btnOk.disabled = !enabled;
+  ui.btnNotOk.disabled = !enabled;
+}
+
+function getActiveRowsNormalized() {
+  if (isSupabaseMode()) {
+    return (state.fovRows || []).map(r => ({
+      az: r.az_deg,
+      el: r.el_deg,
+      status: r.result,
+      t: r.created_at ? Date.parse(r.created_at) : Date.now(),
+      session_id: r.session_id,
+      device_id: r.device_id,
+      created_at: r.created_at,
+    }));
+  }
+  return state.captured.map(r => ({
+    az: r.az,
+    el: r.el,
+    status: r.status,
+    t: r.t,
+    created_at: new Date(r.t).toISOString(),
+  }));
+}
+
+function sbBase() {
+  return ui.sbUrl.value.trim().replace(/\/+$/, "");
+}
+
+function sbHeaders() {
+  const sbKey = ui.sbKey.value.trim();
+  return {
+    "Content-Type": "application/json",
+    "apikey": sbKey,
+    "Authorization": `Bearer ${sbKey}`,
+    "Prefer": "return=representation",
+  };
+}
+
+async function sbFetch(path, method = "GET", body) {
+  const base = sbBase();
+  if (!base) throw new Error("Supabase URL missing");
+  const url = `${base}/rest/v1/${path}`;
+  const options = { method, headers: sbHeaders() };
+  if (body !== undefined) options.body = JSON.stringify(body);
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} ${txt}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+async function createSession(ranges) {
+  const session_id = crypto.randomUUID();
+  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  const payload = [{
+    session_id,
+    device_id,
+    az_min: ranges.azMin,
+    az_max: ranges.azMax,
+    el_min: ranges.elMin,
+    el_max: ranges.elMax,
+    step_deg: ranges.step,
+    started_at: nowISO(),
+  }];
+  await sbFetch("fov_sessions", "POST", payload);
+  state.currentSessionId = session_id;
+  state.lastTelemetryId = null;
+  state.lastTelemetry = null;
+  state.fovRows = [];
+  updateStatus();
+  log(`Session created: ${session_id.substring(0, 8)}`);
+  return session_id;
+}
+
+async function insertMoveCommand(az, el) {
+  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  if (!state.currentSessionId) throw new Error("No session_id. Press Start.");
+  const payload = [{
+    session_id: state.currentSessionId,
+    device_id,
+    cmd: "MOVE",
+    az_cmd: az,
+    el_cmd: el,
+    created_at: nowISO(),
+  }];
+  await sbFetch("command_table", "POST", payload);
+  log(`Inserted Supabase MOVE az=${az}, el=${el}`);
+}
+
+async function pollTelemetryAck() {
+  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  if (!state.currentSessionId) return;
+
+  setCaptureEnabled(false);
+  const start = Date.now();
+  const timeoutMs = 10000;
+
+  while (Date.now() - start < timeoutMs) {
+    const query = new URLSearchParams({
+      session_id: `eq.${state.currentSessionId}`,
+      device_id: `eq.${device_id}`,
+      order: "id.desc",
+      limit: "1",
+    }).toString();
+
+    const rows = await sbFetch(`telemetry_table?${query}`, "GET");
+    const row = rows && rows[0];
+    if (row && row.id !== state.lastTelemetryId) {
+      state.lastTelemetryId = row.id;
+      if (row.status === "EXECUTED") {
+        state.lastTelemetry = { id: row.id, az_actual: row.az_actual, el_actual: row.el_actual };
+        setCaptureEnabled(true);
+        return true;
+      }
+      if (row.status === "ERROR") {
+        log(`Telemetry error: ${row.error_msg || "Unknown"}`);
+        setCaptureEnabled(false);
+        return false;
+      }
+    }
+    await new Promise(r => setTimeout(r, 350));
+  }
+
+  log("Telemetry timeout");
+  setCaptureEnabled(false);
+  return false;
+}
+
+async function insertFovData(result) {
+  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  if (!state.currentSessionId) throw new Error("No session_id. Press Start.");
+  if (!state.lastTelemetry) {
+    log("No telemetry available for capture.");
+    return;
+  }
+  const payload = [{
+    session_id: state.currentSessionId,
+    device_id,
+    az_deg: state.lastTelemetry.az_actual,
+    el_deg: state.lastTelemetry.el_actual,
+    result,
+    created_at: nowISO(),
+  }];
+  await sbFetch("fov_data", "POST", payload);
+  state.fovRows = await fetchFovData(state.currentSessionId);
+  updateStatus();
+}
+
+async function fetchFovData(session_id) {
+  if (!session_id) return [];
+  const query = new URLSearchParams({
+    session_id: `eq.${session_id}`,
+    order: "created_at.asc",
+  }).toString();
+  return sbFetch(`fov_data?${query}`, "GET");
+}
 
 function resizeCanvasToDisplaySize(canvas) {
   const rect = canvas.getBoundingClientRect();
@@ -428,7 +615,8 @@ function drawPolar() {
   // Points
   const dotR = 4 * dpr;
   const outline = "rgba(0,0,0,.6)";
-  state.captured.forEach((p) => {
+  const rows = getActiveRowsNormalized();
+  rows.forEach((p) => {
     const t = deg2rad(p.az);
     const r = elevationToRadius(p.el, maxRadiusPx, maxRadiusDeg);
     const x = cx + r * Math.cos(t);
@@ -450,7 +638,8 @@ function drawPolar3D() {
   const ok = { x: [], y: [], z: [] };
   const bad = { x: [], y: [], z: [] };
 
-  state.captured.forEach((p) => {
+  const rows = getActiveRowsNormalized();
+  rows.forEach((p) => {
     const c = azElToCartesian(p.az, p.el);
     if (p.status === "OK") {
       ok.x.push(c.x); ok.y.push(c.y); ok.z.push(c.z);
@@ -579,6 +768,15 @@ function rebuildPoints() {
 
 ui.btnStart.addEventListener("click", async () => {
   rebuildPoints();
+  if (isSupabaseMode()) {
+    try {
+      await createSession(getRanges());
+      setCaptureEnabled(false);
+    } catch (e) {
+      log(`Session create failed: ${e.message}`);
+      return;
+    }
+  }
   await stepToIndex(0, "Start");
   await runLoop();
 });
@@ -595,14 +793,14 @@ ui.btnStop.addEventListener("click", () => {
   updateStatus();
 });
 
-ui.btnOk.addEventListener("click", () => {
+ui.btnOk.addEventListener("click", async () => {
   if (!state.points.length) rebuildPoints();
-  capture("OK");
+  await capture("OK");
 });
 
-ui.btnNotOk.addEventListener("click", () => {
+ui.btnNotOk.addEventListener("click", async () => {
   if (!state.points.length) rebuildPoints();
-  capture("NOT_OK");
+  await capture("NOT_OK");
 });
 
 window.addEventListener("resize", () => {
@@ -649,6 +847,9 @@ ui.btnExportCsv.addEventListener("click", exportCSV);
 
 ui.btnClear.addEventListener("click", () => {
   state.captured = [];
+  state.fovRows = [];
+  state.lastTelemetryId = null;
+  state.lastTelemetry = null;
   state.idx = 0;
   setRunState("idle");
   log("Cleared captured data.");
@@ -656,6 +857,10 @@ ui.btnClear.addEventListener("click", () => {
 });
 
 // Initial
+if (ui.sbUrl.value.trim() && ui.sbKey.value.trim() && ui.deviceMode.value === "none") {
+  ui.deviceMode.value = "supabase";
+  log("Device mode set to Supabase (prefilled credentials).");
+}
 rebuildPoints();
 setRunState("idle");
 log("Ready. Configure ranges and press Start.");
