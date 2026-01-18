@@ -13,6 +13,7 @@ const ui = {
   azMin: $("azMin"), azMax: $("azMax"),
   elMin: $("elMin"), elMax: $("elMax"),
   stepDeg: $("stepDeg"), dwellMs: $("dwellMs"),
+  customSessionId: $("customSessionId"),
 
   btnStart: $("btnStart"), btnPause: $("btnPause"), btnStop: $("btnStop"),
   btnOk: $("btnOk"), btnNotOk: $("btnNotOk"),
@@ -507,7 +508,8 @@ async function sbFetch(path, method = "GET", body) {
 }
 
 async function createSession(ranges) {
-  const session_id = crypto.randomUUID().replace(/-/g, "").substring(0, 8);
+  const customIdRaw = ui.customSessionId ? ui.customSessionId.value.trim() : "";
+  const session_id = (customIdRaw || crypto.randomUUID().replace(/-/g, "")).substring(0, 8);
   const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
   const payload = [{
     session_id,
