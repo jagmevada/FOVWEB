@@ -36,6 +36,7 @@ const ui = {
   progressText: $("progressText"),
 
   polarCanvas: $("polarCanvas"),
+  polar3d: $("polar3d"),
 
   log: $("log"),
   rows: $("rows"),
@@ -105,6 +106,7 @@ function updateStatus() {
 
   renderTable();
   drawPolar();
+  drawPolar3D();
 }
 
 function renderTable() {
@@ -360,6 +362,16 @@ function deg2rad(deg) {
   return (deg * Math.PI) / 180;
 }
 
+function azElToCartesian(azDeg, elDeg) {
+  const theta = deg2rad(azDeg);
+  const phi = deg2rad(90 - elDeg);
+  const r = 1;
+  const x = r * Math.sin(phi) * Math.cos(theta);
+  const y = r * Math.sin(phi) * Math.sin(theta);
+  const z = r * Math.cos(phi);
+  return { x, y, z };
+}
+
 function elevationToRadius(elevation, maxRadiusPx, maxRadiusDeg) {
   const rDeg = 90 - elevation;
   return (rDeg / maxRadiusDeg) * maxRadiusPx;
@@ -431,6 +443,110 @@ function drawPolar() {
   });
 }
 
+function drawPolar3D() {
+  const el = ui.polar3d;
+  if (!el || typeof Plotly === "undefined") return;
+
+  const ok = { x: [], y: [], z: [] };
+  const bad = { x: [], y: [], z: [] };
+
+  state.captured.forEach((p) => {
+    const c = azElToCartesian(p.az, p.el);
+    if (p.status === "OK") {
+      ok.x.push(c.x); ok.y.push(c.y); ok.z.push(c.z);
+    } else {
+      bad.x.push(c.x); bad.y.push(c.y); bad.z.push(c.z);
+    }
+  });
+
+  const data = [
+    {
+      type: "scatter3d",
+      mode: "markers",
+      x: ok.x,
+      y: ok.y,
+      z: ok.z,
+      marker: { size: 4, color: "#22c55e", line: { color: "rgba(0,0,0,.6)", width: 1 } },
+      name: "OK",
+    },
+    {
+      type: "scatter3d",
+      mode: "markers",
+      x: bad.x,
+      y: bad.y,
+      z: bad.z,
+      marker: { size: 4, color: "#ef4444", line: { color: "rgba(0,0,0,.6)", width: 1 } },
+      name: "NOT OK",
+    },
+  ];
+
+  const ranges = getRanges();
+  const gridStep = ranges.step <= 5 ? 5 : 10;
+  const azTicks = [];
+  for (let a = -90; a <= 90 + 1e-9; a += gridStep) azTicks.push(Math.round(a));
+  const elMin = Math.min(ranges.elMin, ranges.elMax);
+  const elTicks = [];
+  for (let e = Math.ceil(elMin / gridStep) * gridStep; e <= 90 + 1e-9; e += gridStep) elTicks.push(Math.round(e));
+  if (!elTicks.includes(elMin)) elTicks.unshift(elMin);
+
+  const azTickVals = azTicks.map(d => d / 90);
+  const azTickText = azTicks.map(d => `${d}°`);
+  const elTickVals = elTicks.map(d => d / 90);
+  const elTickText = elTicks.map(d => `${d}°`);
+
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    margin: { l: 0, r: 0, b: 0, t: 0 },
+    scene: {
+      xaxis: {
+        title: "Azimuth (deg)",
+        showgrid: true,
+        zeroline: true,
+        showticklabels: true,
+        range: [-1, 1],
+        tickvals: azTickVals,
+        ticktext: azTickText,
+        gridcolor: "rgba(255,255,255,.08)",
+        zerolinecolor: "rgba(255,255,255,.18)",
+        tickfont: { color: "#e7eef6" },
+        titlefont: { color: "#e7eef6" },
+      },
+      yaxis: {
+        title: "Azimuth (deg)",
+        showgrid: true,
+        zeroline: true,
+        showticklabels: true,
+        range: [-1, 1],
+        tickvals: azTickVals,
+        ticktext: azTickText,
+        gridcolor: "rgba(255,255,255,.08)",
+        zerolinecolor: "rgba(255,255,255,.18)",
+        tickfont: { color: "#e7eef6" },
+        titlefont: { color: "#e7eef6" },
+      },
+      zaxis: {
+        title: "Elevation (deg)",
+        showgrid: true,
+        zeroline: true,
+        showticklabels: true,
+        range: [-1, 1],
+        tickvals: elTickVals,
+        ticktext: elTickText,
+        gridcolor: "rgba(255,255,255,.08)",
+        zerolinecolor: "rgba(255,255,255,.18)",
+        tickfont: { color: "#e7eef6" },
+        titlefont: { color: "#e7eef6" },
+      },
+      aspectmode: "cube",
+    },
+    showlegend: true,
+    legend: { font: { color: "#e7eef6" } },
+  };
+
+  Plotly.react(el, data, layout, { displayModeBar: false, responsive: true });
+}
+
 function getRanges() {
   const azMin = clampInt(ui.azMin.value, -90);
   const azMax = clampInt(ui.azMax.value, 90);
@@ -491,6 +607,9 @@ ui.btnNotOk.addEventListener("click", () => {
 
 window.addEventListener("resize", () => {
   drawPolar();
+  if (ui.polar3d && typeof Plotly !== "undefined") {
+    Plotly.Plots.resize(ui.polar3d);
+  }
 });
 
 ui.btnNext.addEventListener("click", async () => {
