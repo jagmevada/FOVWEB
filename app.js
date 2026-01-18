@@ -35,6 +35,8 @@ const ui = {
   stBad: $("stBad"),
   progressBar: $("progressBar"),
   progressText: $("progressText"),
+  telemetryStatus: $("telemetryStatus"),
+  btnRetry: $("btnRetry"),
 
   polarCanvas: $("polarCanvas"),
   polar3d: $("polar3d"),
@@ -53,6 +55,7 @@ const state = {
   currentSessionId: "",
   lastTelemetryId: null,
   lastTelemetry: null,
+  lastTelemetryError: "",
   fovRows: [],
 };
 
@@ -100,6 +103,12 @@ function updateStatus() {
   ui.stEl.textContent = `${p.el}°`;
   ui.stIndex.textContent = `${Math.min(state.idx + 1, total)} / ${total}`;
   ui.stSessionId.textContent = state.currentSessionId ? state.currentSessionId.substring(0, 8) : "—";
+
+  if (!isSupabaseMode()) {
+    clearTelemetryUI();
+    setRetryEnabled(false);
+    setCaptureEnabled(true);
+  }
 
   const rows = getActiveRowsNormalized();
   const okCount = rows.filter(x => x.status === "OK").length;
@@ -189,12 +198,36 @@ async function sendMoveCommand(az, el) {
       if (!state.currentSessionId) {
         await createSession(getRanges());
       }
+      clearTelemetryUI();
+      setRetryEnabled(false);
       setCaptureEnabled(false);
       await insertMoveCommand(az, el);
       await pollTelemetryAck();
     } catch (e) {
       log(`Supabase cmd insert failed: ${e.message}`);
     }
+  }
+}
+
+async function retryCurrentPointMove() {
+  if (!isSupabaseMode()) return;
+  if (!state.points.length) {
+    log("No points to retry.");
+    return;
+  }
+
+  const p = currentPoint();
+  showTelemetryOk("Retrying...");
+  setRetryEnabled(false);
+  setCaptureEnabled(false);
+
+  try {
+    await insertMoveCommand(p.az, p.el);
+    await pollTelemetryAck();
+  } catch (e) {
+    showTelemetryError(e.message || "Unknown error");
+    setRetryEnabled(true);
+    log(`Retry failed: ${e.message}`);
   }
 }
 
@@ -254,6 +287,10 @@ async function capture(status) {
 
   if (isSupabaseMode()) {
     try {
+      if (state.lastTelemetryError) {
+        log("Telemetry error present. Retry before capture.");
+        return;
+      }
       if (!state.lastTelemetry) {
         log("No telemetry available for capture.");
         return;
@@ -376,6 +413,43 @@ function setCaptureEnabled(enabled) {
   ui.btnNotOk.disabled = !enabled;
 }
 
+function clearTelemetryUI() {
+  state.lastTelemetryError = "";
+  if (ui.telemetryStatus) {
+    ui.telemetryStatus.textContent = "";
+    ui.telemetryStatus.classList.add("hidden");
+    ui.telemetryStatus.classList.remove("error", "ok");
+  }
+}
+
+function showTelemetryError(msg) {
+  state.lastTelemetryError = msg || "Unknown error";
+  if (ui.telemetryStatus) {
+    ui.telemetryStatus.textContent = state.lastTelemetryError;
+    ui.telemetryStatus.classList.remove("hidden", "ok");
+    ui.telemetryStatus.classList.add("error");
+  }
+}
+
+function showTelemetryOk(msgOptional = "") {
+  if (!msgOptional) {
+    clearTelemetryUI();
+    return;
+  }
+  if (ui.telemetryStatus) {
+    ui.telemetryStatus.textContent = msgOptional;
+    ui.telemetryStatus.classList.remove("hidden", "error");
+    ui.telemetryStatus.classList.add("ok");
+  }
+}
+
+function setRetryEnabled(enabled) {
+  if (!ui.btnRetry) return;
+  ui.btnRetry.disabled = !enabled;
+  if (enabled) ui.btnRetry.classList.remove("hidden");
+  else ui.btnRetry.classList.add("hidden");
+}
+
 function getActiveRowsNormalized() {
   if (isSupabaseMode()) {
     return (state.fovRows || []).map(r => ({
@@ -443,7 +517,10 @@ async function createSession(ranges) {
   state.currentSessionId = session_id;
   state.lastTelemetryId = null;
   state.lastTelemetry = null;
+  state.lastTelemetryError = "";
   state.fovRows = [];
+  clearTelemetryUI();
+  setRetryEnabled(false);
   updateStatus();
   log(`Session created: ${session_id.substring(0, 8)}`);
   return session_id;
@@ -486,11 +563,16 @@ async function pollTelemetryAck() {
       state.lastTelemetryId = row.id;
       if (row.status === "EXECUTED") {
         state.lastTelemetry = { id: row.id, az_actual: row.az_actual, el_actual: row.el_actual };
+        clearTelemetryUI();
+        showTelemetryOk();
+        setRetryEnabled(false);
         setCaptureEnabled(true);
         return true;
       }
       if (row.status === "ERROR") {
+        showTelemetryError(row.error_msg || "Unknown error");
         log(`Telemetry error: ${row.error_msg || "Unknown"}`);
+        setRetryEnabled(true);
         setCaptureEnabled(false);
         return false;
       }
@@ -500,6 +582,7 @@ async function pollTelemetryAck() {
 
   log("Telemetry timeout");
   setCaptureEnabled(false);
+  setRetryEnabled(false);
   return false;
 }
 
@@ -801,6 +884,10 @@ ui.btnOk.addEventListener("click", async () => {
 ui.btnNotOk.addEventListener("click", async () => {
   if (!state.points.length) rebuildPoints();
   await capture("NOT_OK");
+});
+
+ui.btnRetry.addEventListener("click", async () => {
+  await retryCurrentPointMove();
 });
 
 window.addEventListener("resize", () => {
