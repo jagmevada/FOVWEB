@@ -640,13 +640,14 @@ function deg2rad(deg) {
   return (deg * Math.PI) / 180;
 }
 
-function azElToUnitSphereXYZ(azDeg, elDeg) {
+function azElToUnitSphere(azDeg, elDeg) {
   const az = deg2rad(azDeg);
   const el = deg2rad(elDeg);
-  const x = Math.cos(el) * Math.cos(az);
-  const y = Math.cos(el) * Math.sin(az);
-  const z = Math.sin(el);
-  return { x, y, z };
+  return {
+    x: Math.cos(el) * Math.cos(az),
+    y: Math.cos(el) * Math.sin(az),
+    z: Math.sin(el)
+  };
 }
 
 function elevationToRadius(elevation, maxRadiusPx, maxRadiusDeg) {
@@ -730,7 +731,7 @@ function drawPolar3D() {
 
   const rows = getActiveRowsNormalized();
   rows.forEach((p) => {
-    const c = azElToUnitSphereXYZ(p.az, p.el);
+    const c = azElToUnitSphere(p.az, p.el);
     const timeStr = new Date(p.t).toLocaleString();
     const cd = [p.az, p.el, p.status, timeStr];
     if (p.status === "OK") {
@@ -762,35 +763,61 @@ function drawPolar3D() {
     zs.push(rowZ);
   }
 
-  const gridColor = "rgba(255,255,255,.12)";
+  // Spherical grid lines
+  const gridLineStyle = { width: 1.2, color: "rgba(40,70,120,0.45)" };
+  const gridTraces = [];
 
-  const makeCircleEl = (elDeg) => {
-    const azList = [];
-    for (let a = 0; a <= 360; a += 5) azList.push(a);
+  // Latitude circles (every 10°)
+  for (let elDeg = -80; elDeg <= 80; elDeg += 10) {
     const x = [], y = [], z = [];
-    azList.forEach((a) => {
-      const c = azElToUnitSphereXYZ(a, elDeg);
+    for (let azDeg = 0; azDeg <= 360; azDeg += 5) {
+      const c = azElToUnitSphere(azDeg, elDeg);
       x.push(c.x); y.push(c.y); z.push(c.z);
+    }
+    gridTraces.push({
+      type: "scatter3d",
+      mode: "lines",
+      x, y, z,
+      line: gridLineStyle,
+      hoverinfo: "skip",
+      showlegend: false
     });
-    return { x, y, z };
-  };
+  }
 
-  const makeMeridianAz = (azDeg) => {
-    const elList = [];
-    for (let e = -90; e <= 90; e += 5) elList.push(e);
+  // Longitude meridians (every 10°)
+  for (let azDeg = -180; azDeg <= 170; azDeg += 10) {
     const x = [], y = [], z = [];
-    elList.forEach((e) => {
-      const c = azElToUnitSphereXYZ(azDeg, e);
+    for (let elDeg = -90; elDeg <= 90; elDeg += 5) {
+      const c = azElToUnitSphere(azDeg, elDeg);
       x.push(c.x); y.push(c.y); z.push(c.z);
+    }
+    gridTraces.push({
+      type: "scatter3d",
+      mode: "lines",
+      x, y, z,
+      line: gridLineStyle,
+      hoverinfo: "skip",
+      showlegend: false
     });
-    return { x, y, z };
-  };
+  }
 
-  const equator = makeCircleEl(0);
-  const el30 = makeCircleEl(30);
-  const el60 = makeCircleEl(60);
-  const az0 = makeMeridianAz(0);
-  const az90 = makeMeridianAz(90);
+  // Equator labels
+  const labelAzimuths = [-90, -45, 0, 45, 90];
+  const labelRadius = 1.03;
+  const labelTraces = labelAzimuths.map(azDeg => {
+    const c = azElToUnitSphere(azDeg, 0);
+    return {
+      type: "scatter3d",
+      mode: "text",
+      x: [c.x * labelRadius],
+      y: [c.y * labelRadius],
+      z: [c.z * labelRadius],
+      text: [`${azDeg}°`],
+      textfont: { color: "rgba(231,238,246,.85)", size: 11 },
+      hoverinfo: "skip",
+      showlegend: false
+    };
+  });
 
   const data = [
     {
@@ -798,67 +825,14 @@ function drawPolar3D() {
       x: xs,
       y: ys,
       z: zs,
-      opacity: 0.1,
+      opacity: 0.10,
       showscale: false,
       colorscale: [[0, "rgba(255,255,255,0.12)"], [1, "rgba(255,255,255,0.12)"]],
       hoverinfo: "skip",
-      name: "Sphere",
+      showlegend: false
     },
-    {
-      type: "scatter3d",
-      mode: "lines",
-      x: equator.x,
-      y: equator.y,
-      z: equator.z,
-      line: { color: gridColor, width: 2 },
-      hoverinfo: "skip",
-      name: "Equator",
-      showlegend: false,
-    },
-    {
-      type: "scatter3d",
-      mode: "lines",
-      x: el30.x,
-      y: el30.y,
-      z: el30.z,
-      line: { color: gridColor, width: 1 },
-      hoverinfo: "skip",
-      name: "el30",
-      showlegend: false,
-    },
-    {
-      type: "scatter3d",
-      mode: "lines",
-      x: el60.x,
-      y: el60.y,
-      z: el60.z,
-      line: { color: gridColor, width: 1 },
-      hoverinfo: "skip",
-      name: "el60",
-      showlegend: false,
-    },
-    {
-      type: "scatter3d",
-      mode: "lines",
-      x: az0.x,
-      y: az0.y,
-      z: az0.z,
-      line: { color: gridColor, width: 1 },
-      hoverinfo: "skip",
-      name: "az0",
-      showlegend: false,
-    },
-    {
-      type: "scatter3d",
-      mode: "lines",
-      x: az90.x,
-      y: az90.y,
-      z: az90.z,
-      line: { color: gridColor, width: 1 },
-      hoverinfo: "skip",
-      name: "az90",
-      showlegend: false,
-    },
+    ...gridTraces,
+    ...labelTraces,
     {
       type: "scatter3d",
       mode: "markers",
@@ -868,7 +842,7 @@ function drawPolar3D() {
       customdata: ok.customdata,
       marker: { size: 4, color: "#22c55e", line: { color: "rgba(0,0,0,.6)", width: 1 } },
       name: "OK",
-      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>",
+      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>"
     },
     {
       type: "scatter3d",
@@ -879,8 +853,8 @@ function drawPolar3D() {
       customdata: bad.customdata,
       marker: { size: 4, color: "#ef4444", line: { color: "rgba(0,0,0,.6)", width: 1 } },
       name: "NOT OK",
-      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>",
-    },
+      hovertemplate: "az=%{customdata[0]}°<br>el=%{customdata[1]}°<br>%{customdata[2]}<br>%{customdata[3]}<extra></extra>"
+    }
   ];
 
   const layout = {
@@ -889,42 +863,36 @@ function drawPolar3D() {
     margin: { l: 0, r: 0, b: 0, t: 0 },
     scene: {
       xaxis: {
-        title: "X",
-        showgrid: true,
-        zeroline: true,
-        showticklabels: true,
-        range: [-1.1, 1.1],
-        gridcolor: "rgba(255,255,255,.08)",
-        zerolinecolor: "rgba(255,255,255,.18)",
-        tickfont: { color: "#e7eef6" },
-        titlefont: { color: "#e7eef6" },
+        visible: false,
+        showgrid: false,
+        showticklabels: false,
+        showline: false,
+        zeroline: false,
+        range: [-1.1, 1.1]
       },
       yaxis: {
-        title: "Y",
-        showgrid: true,
-        zeroline: true,
-        showticklabels: true,
-        range: [-1.1, 1.1],
-        gridcolor: "rgba(255,255,255,.08)",
-        zerolinecolor: "rgba(255,255,255,.18)",
-        tickfont: { color: "#e7eef6" },
-        titlefont: { color: "#e7eef6" },
+        visible: false,
+        showgrid: false,
+        showticklabels: false,
+        showline: false,
+        zeroline: false,
+        range: [-1.1, 1.1]
       },
       zaxis: {
-        title: "Z",
-        showgrid: true,
-        zeroline: true,
-        showticklabels: true,
-        range: [-1.1, 1.1],
-        gridcolor: "rgba(255,255,255,.08)",
-        zerolinecolor: "rgba(255,255,255,.18)",
-        tickfont: { color: "#e7eef6" },
-        titlefont: { color: "#e7eef6" },
+        visible: false,
+        showgrid: false,
+        showticklabels: false,
+        showline: false,
+        zeroline: false,
+        range: [-1.1, 1.1]
       },
       aspectmode: "cube",
+      camera: {
+        eye: { x: 1.55, y: 1.25, z: 1.05 }
+      }
     },
     showlegend: true,
-    legend: { font: { color: "#e7eef6" } },
+    legend: { font: { color: "#e7eef6" } }
   };
 
   Plotly.react(el, data, layout, { displayModeBar: false, responsive: true });
