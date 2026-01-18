@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Laser FoV Mapping</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="dot"></div>
+      <div>
+        <div class="title">Laser FoV Mapping</div>
+        <div class="subtitle">Azimuth / Elevation scan + OK / Not OK capture</div>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <button id="btnExportJson" class="btn ghost">Export JSON</button>
+      <button id="btnExportCsv" class="btn ghost">Export CSV</button>
+      <button id="btnClear" class="btn danger ghost">Clear</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Left: Controls -->
+    <section class="card">
+      <h2>Scan Setup</h2>
+
+      <div class="form-grid">
+        <label>
+          Azimuth min (deg)
+          <input id="azMin" type="number" value="-90" step="1" />
+        </label>
+        <label>
+          Azimuth max (deg)
+          <input id="azMax" type="number" value="90" step="1" />
+        </label>
+        <label>
+          Elevation min (deg)
+          <input id="elMin" type="number" value="-15" step="1" />
+        </label>
+        <label>
+          Elevation max (deg)
+          <input id="elMax" type="number" value="90" step="1" />
+        </label>
+        <label>
+          Step size (deg)
+          <input id="stepDeg" type="number" value="5" step="1" />
+        </label>
+        <label>
+          Dwell / settle (ms)
+          <input id="dwellMs" type="number" value="250" step="10" />
+        </label>
+      </div>
+
+      <div class="row gap">
+        <button id="btnStart" class="btn primary">Start</button>
+        <button id="btnPause" class="btn">Pause</button>
+        <button id="btnStop" class="btn danger">Stop</button>
+      </div>
+
+      <hr />
+
+      <h2>Capture</h2>
+      <div class="row gap">
+        <button id="btnOk" class="btn good">OK</button>
+        <button id="btnNotOk" class="btn bad">Not OK</button>
+      </div>
+
+      <p class="hint">
+        While scanning, mark each point:
+        <b>OK</b> = laser unobstructed,
+        <b>Not OK</b> = obstructed.
+      </p>
+
+      <hr />
+
+      <h2>Manual Step</h2>
+      <div class="row gap">
+        <button id="btnPrev" class="btn ghost">◀ Previous</button>
+        <button id="btnNext" class="btn ghost">Next ▶</button>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Go Azimuth (deg)
+          <input id="goAz" type="number" value="0" step="1" />
+        </label>
+        <label>
+          Go Elevation (deg)
+          <input id="goEl" type="number" value="0" step="1" />
+        </label>
+      </div>
+      <button id="btnGoto" class="btn">Go to Angle</button>
+
+      <hr />
+
+      <h2>Optional: Device / Supabase</h2>
+      <div class="form-grid">
+        <label>
+          Device mode
+          <select id="deviceMode">
+            <option value="none" selected>None (local only)</option>
+            <option value="http">ESP32 HTTP (direct)</option>
+            <option value="supabase">Supabase commands table</option>
+          </select>
+        </label>
+
+        <label>
+          ESP32 Base URL (http)
+          <input id="espBaseUrl" type="text" placeholder="http://192.168.1.50" />
+        </label>
+
+        <label>
+          Supabase URL
+          <input id="sbUrl" type="text" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label>
+          Supabase anon key
+          <input id="sbKey" type="password" placeholder="eyJhbGci..." />
+        </label>
+
+        <label>
+          Command endpoint/table
+          <input id="sbCmdTarget" type="text" value="commands" />
+        </label>
+        <label>
+          device_id / sensor_id
+          <input id="sbDeviceId" type="text" placeholder="fov_rig_1" />
+        </label>
+      </div>
+
+      <p class="hint small">
+        You can keep “None” for now. When ready, switch to HTTP or Supabase and it will send
+        motor move commands for each step.
+      </p>
+    </section>
+
+    <!-- Middle: Status -->
+    <section class="card">
+      <h2>Status</h2>
+
+      <div class="status-grid">
+        <div class="stat">
+          <div class="k">State</div>
+          <div id="stState" class="v">Idle</div>
+        </div>
+        <div class="stat">
+          <div class="k">Azimuth</div>
+          <div id="stAz" class="v">0°</div>
+        </div>
+        <div class="stat">
+          <div class="k">Elevation</div>
+          <div id="stEl" class="v">0°</div>
+        </div>
+        <div class="stat">
+          <div class="k">Point</div>
+          <div id="stIndex" class="v">0 / 0</div>
+        </div>
+        <div class="stat">
+          <div class="k">OK</div>
+          <div id="stOk" class="v goodText">0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Not OK</div>
+          <div id="stBad" class="v badText">0</div>
+        </div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress">
+          <div id="progressBar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div id="progressText" class="progress-text">0%</div>
+      </div>
+
+      <h2>Recent Log</h2>
+      <div id="log" class="log"></div>
+    </section>
+
+    <!-- Right: Table -->
+    <section class="card">
+      <h2>Captured Points</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Az (°)</th>
+              <th>El (°)</th>
+              <th>Status</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="hint small">
+        Tip: You can still mark points manually (OK / Not OK) even when paused.
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>FoV mapping UI • Static GitHub Pages</span>
+    <span class="muted">v1</span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
