@@ -53,6 +53,10 @@
           Dwell / settle (ms)
           <input id="dwellMs" type="number" value="250" step="10" />
         </label>
+        <label>
+          device_id / sensor_id
+          <input id="sbDeviceId" type="text" value="dev1" />
+        </label>
       </div>
 
       <div class="row gap">
@@ -95,48 +99,6 @@
       </div>
       <button id="btnGoto" class="btn">Go to Angle</button>
 
-      <hr />
-
-      <h2>Optional: Device / Supabase</h2>
-      
-      <div class="form-grid">
-        <label>
-          Device mode
-          <select id="deviceMode">
-            <option value="none" selected>None (local only)</option>
-            <option value="http">ESP32 HTTP (direct)</option>
-            <option value="supabase">Supabase commands table</option>
-          </select>
-        </label>
-
-        <label>
-          ESP32 Base URL (http)
-          <input id="espBaseUrl" type="text" placeholder="http://192.168.1.50" />
-        </label>
-
-        <label>
-          Supabase URL
-          <input id="sbUrl" type="text" value="https://hsvctxongbvtnlofsazd.supabase.co" placeholder="https://xxxx.supabase.co" />
-        </label>
-        <label>
-          Supabase anon key
-          <input id="sbKey" type="password" value="sb_publishable_aZWobGm_WPP-H0vxx7VILA_6qiAFtIq" placeholder="eyJhbGci..." />
-        </label>
-
-        <label>
-          Command endpoint/table
-          <input id="sbCmdTarget" type="text" value="commands" />
-        </label>
-        <label>
-          device_id / sensor_id
-          <input id="sbDeviceId" type="text" placeholder="fov_rig_1" />
-        </label>
-      </div>
-
-      <p class="hint small">
-        You can keep “None” for now. When ready, switch to HTTP or Supabase and it will send
-        motor move commands for each step.
-      </p>
     </section>
 
     <!-- Middle: Status -->

@@ -5,6 +5,10 @@
 
 const $ = (id) => document.getElementById(id);
 
+const DEFAULT_SB_URL = "https://hsvctxongbvtnlofsazd.supabase.co";
+const DEFAULT_SB_KEY = "sb_publishable_aZWobGm_WPP-H0vxx7VILA_6qiAFtIq";
+const DEFAULT_DEVICE_ID = "dev1";
+
 const ui = {
   azMin: $("azMin"), azMax: $("azMax"),
   elMin: $("elMin"), elMax: $("elMax"),
@@ -157,7 +161,7 @@ function badgeHTML(status) {
 // =======================
 
 async function sendMoveCommand(az, el) {
-  const mode = ui.deviceMode.value;
+  const mode = ui.deviceMode ? ui.deviceMode.value : "supabase";
 
   if (mode === "none") return;
 
@@ -187,8 +191,8 @@ async function sendMoveCommand(az, el) {
   }
 
   if (mode === "supabase") {
-    const sbUrl = ui.sbUrl.value.trim();
-    const sbKey = ui.sbKey.value.trim();
+    const sbUrl = ui.sbUrl ? ui.sbUrl.value.trim() : DEFAULT_SB_URL;
+    const sbKey = ui.sbKey ? ui.sbKey.value.trim() : DEFAULT_SB_KEY;
     if (!sbUrl || !sbKey) {
       log("Supabase mode selected, but URL/Key missing.");
       return;
@@ -353,7 +357,7 @@ function exportJSON() {
         created_at: nowISO(),
         ranges: getRanges(),
         session_id: state.currentSessionId,
-        device_id: ui.sbDeviceId.value.trim() || "fov_rig_1",
+        device_id: ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID,
         total_points: state.points.length,
         captured_points: (state.fovRows || []).length
       },
@@ -381,7 +385,7 @@ function exportCSV() {
   if (isSupabaseMode()) {
     const lines = ["index,session_id,device_id,az_deg,el_deg,result,created_at"];
     (state.fovRows || []).forEach((r, i) => {
-      lines.push(`${i + 1},${r.session_id},${r.device_id},${r.az_deg},${r.el_deg},${r.result},${r.created_at}`);
+      lines.push(`${i + 1},${r.session_id},${r.device_id || (ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID)},${r.az_deg},${r.el_deg},${r.result},${r.created_at}`);
     });
     download(`fov_map_${Date.now()}.csv`, lines.join("\n"), "text/csv");
     return;
@@ -405,6 +409,7 @@ function exportCSV() {
 // =======================
 
 function isSupabaseMode() {
+  if (!ui.deviceMode) return true;
   return ui.deviceMode.value === "supabase";
 }
 
@@ -472,11 +477,12 @@ function getActiveRowsNormalized() {
 }
 
 function sbBase() {
-  return ui.sbUrl.value.trim().replace(/\/+$/, "");
+  const val = ui.sbUrl ? ui.sbUrl.value.trim() : DEFAULT_SB_URL;
+  return val.replace(/\/+$/, "");
 }
 
 function sbHeaders() {
-  const sbKey = ui.sbKey.value.trim();
+  const sbKey = ui.sbKey ? ui.sbKey.value.trim() : DEFAULT_SB_KEY;
   return {
     "Content-Type": "application/json",
     "apikey": sbKey,
@@ -501,8 +507,8 @@ async function sbFetch(path, method = "GET", body) {
 }
 
 async function createSession(ranges) {
-  const session_id = crypto.randomUUID();
-  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  const session_id = crypto.randomUUID().replace(/-/g, "").substring(0, 8);
+  const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
   const payload = [{
     session_id,
     device_id,
@@ -527,7 +533,7 @@ async function createSession(ranges) {
 }
 
 async function insertMoveCommand(az, el) {
-  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
   if (!state.currentSessionId) throw new Error("No session_id. Press Start.");
   const payload = [{
     session_id: state.currentSessionId,
@@ -542,7 +548,7 @@ async function insertMoveCommand(az, el) {
 }
 
 async function pollTelemetryAck() {
-  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
   if (!state.currentSessionId) return;
 
   setCaptureEnabled(false);
@@ -587,7 +593,7 @@ async function pollTelemetryAck() {
 }
 
 async function insertFovData(result) {
-  const device_id = ui.sbDeviceId.value.trim() || "fov_rig_1";
+  const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
   if (!state.currentSessionId) throw new Error("No session_id. Press Start.");
   if (!state.lastTelemetry) {
     log("No telemetry available for capture.");
@@ -944,10 +950,6 @@ ui.btnClear.addEventListener("click", () => {
 });
 
 // Initial
-if (ui.sbUrl.value.trim() && ui.sbKey.value.trim() && ui.deviceMode.value === "none") {
-  ui.deviceMode.value = "supabase";
-  log("Device mode set to Supabase (prefilled credentials).");
-}
 rebuildPoints();
 setRunState("idle");
 log("Ready. Configure ranges and press Start.");
