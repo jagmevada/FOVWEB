@@ -8,6 +8,9 @@ const $ = (id) => document.getElementById(id);
 const DEFAULT_SB_URL = "https://hsvctxongbvtnlofsazd.supabase.co";
 const DEFAULT_SB_KEY = "sb_publishable_aZWobGm_WPP-H0vxx7VILA_6qiAFtIq";
 const DEFAULT_DEVICE_ID = "dev1";
+const STORAGE_KEYS = {
+  sessionId: "fov.sessionId",
+};
 
 const ui = {
   azMin: $("azMin"), azMax: $("azMax"),
@@ -456,6 +459,28 @@ function setRetryEnabled(enabled) {
   else ui.btnRetry.classList.add("hidden");
 }
 
+function setSessionId(session_id) {
+  state.currentSessionId = session_id || "";
+  if (state.currentSessionId) {
+    try { localStorage.setItem(STORAGE_KEYS.sessionId, state.currentSessionId); } catch { /* ignore */ }
+  }
+  updateStatus();
+}
+
+function clearSessionId() {
+  state.currentSessionId = "";
+  try { localStorage.removeItem(STORAGE_KEYS.sessionId); } catch { /* ignore */ }
+  updateStatus();
+}
+
+function loadPersistedSessionId() {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.sessionId) || "";
+  } catch {
+    return "";
+  }
+}
+
 function getActiveRowsNormalized() {
   if (isSupabaseMode()) {
     return (state.fovRows || []).map(r => ({
@@ -478,12 +503,14 @@ function getActiveRowsNormalized() {
 }
 
 function sbBase() {
-  const val = ui.sbUrl ? ui.sbUrl.value.trim() : DEFAULT_SB_URL;
+  const raw = ui.sbUrl ? ui.sbUrl.value.trim() : "";
+  const val = raw || DEFAULT_SB_URL;
   return val.replace(/\/+$/, "");
 }
 
 function sbHeaders() {
-  const sbKey = ui.sbKey ? ui.sbKey.value.trim() : DEFAULT_SB_KEY;
+  const raw = ui.sbKey ? ui.sbKey.value.trim() : "";
+  const sbKey = raw || DEFAULT_SB_KEY;
   return {
     "Content-Type": "application/json",
     "apikey": sbKey,
@@ -511,6 +538,16 @@ async function createSession(ranges) {
   const customIdRaw = ui.customSessionId ? ui.customSessionId.value.trim() : "";
   const session_id = (customIdRaw || crypto.randomUUID().replace(/-/g, "")).substring(0, 8);
   const device_id = ui.sbDeviceId ? (ui.sbDeviceId.value.trim() || DEFAULT_DEVICE_ID) : DEFAULT_DEVICE_ID;
+  const existing = await fetchSessionById(session_id).catch(() => null);
+  if (existing) {
+    setSessionId(session_id);
+    state.fovRows = await fetchFovData(session_id);
+    clearTelemetryUI();
+    setRetryEnabled(false);
+    updateStatus();
+    log(`Session exists. Reusing: ${session_id.substring(0, 8)}`);
+    return session_id;
+  }
   const payload = [{
     session_id,
     device_id,
@@ -521,8 +558,24 @@ async function createSession(ranges) {
     step_deg: ranges.step,
     started_at: nowISO(),
   }];
-  await sbFetch("fov_sessions", "POST", payload);
-  state.currentSessionId = session_id;
+  try {
+    await sbFetch("fov_sessions", "POST", payload);
+  } catch (e) {
+    if (String(e.message || "").includes("HTTP 409")) {
+      const existingAfterConflict = await fetchSessionById(session_id).catch(() => null);
+      if (existingAfterConflict) {
+        setSessionId(session_id);
+        state.fovRows = await fetchFovData(session_id);
+        clearTelemetryUI();
+        setRetryEnabled(false);
+        updateStatus();
+        log(`Session exists (conflict). Reusing: ${session_id.substring(0, 8)}`);
+        return session_id;
+      }
+    }
+    throw e;
+  }
+  setSessionId(session_id);
   state.lastTelemetryId = null;
   state.lastTelemetry = null;
   state.lastTelemetryError = "";
@@ -532,6 +585,16 @@ async function createSession(ranges) {
   updateStatus();
   log(`Session created: ${session_id.substring(0, 8)}`);
   return session_id;
+}
+
+async function fetchSessionById(session_id) {
+  if (!session_id) return null;
+  const query = new URLSearchParams({
+    session_id: `eq.${session_id}`,
+    limit: "1",
+  }).toString();
+  const rows = await sbFetch(`fov_sessions?${query}`, "GET");
+  return rows && rows[0] ? rows[0] : null;
 }
 
 async function insertMoveCommand(az, el) {
@@ -899,10 +962,10 @@ function drawPolar3D() {
 }
 
 function getRanges() {
-  const azMin = clampInt(ui.azMin.value, -90);
-  const azMax = clampInt(ui.azMax.value, 90);
+  const azMin = clampInt(ui.azMin.value, -50);
+  const azMax = clampInt(ui.azMax.value, 50);
   const elMin = clampInt(ui.elMin.value, -15);
-  const elMax = clampInt(ui.elMax.value, 90);
+  const elMax = clampInt(ui.elMax.value, 85);
   const step = Math.max(1, clampInt(ui.stepDeg.value, 5));
   const dwellMs = Math.max(0, clampInt(ui.dwellMs.value, 250));
   return { azMin, azMax, elMin, elMax, step, dwellMs };
@@ -932,7 +995,14 @@ ui.btnStart.addEventListener("click", async () => {
   rebuildPoints();
   if (isSupabaseMode()) {
     try {
-      await createSession(getRanges());
+      const customId = ui.customSessionId ? ui.customSessionId.value.trim() : "";
+      if (!customId && state.currentSessionId) {
+        log(`Reusing session: ${state.currentSessionId.substring(0, 8)}`);
+        state.fovRows = await fetchFovData(state.currentSessionId);
+        updateStatus();
+      } else {
+        await createSession(getRanges());
+      }
       setCaptureEnabled(false);
     } catch (e) {
       log(`Session create failed: ${e.message}`);
@@ -951,6 +1021,7 @@ ui.btnPause.addEventListener("click", () => {
 
 ui.btnStop.addEventListener("click", () => {
   setRunState("stopped");
+  clearSessionId();
   log("Stopped.");
   updateStatus();
 });
@@ -1025,5 +1096,20 @@ ui.btnClear.addEventListener("click", () => {
 // Initial
 rebuildPoints();
 setRunState("idle");
+const persistedSessionId = loadPersistedSessionId();
+if (persistedSessionId) {
+  state.currentSessionId = persistedSessionId;
+  if (ui.customSessionId && !ui.customSessionId.value.trim()) {
+    ui.customSessionId.value = persistedSessionId;
+  }
+  if (isSupabaseMode()) {
+    fetchFovData(persistedSessionId)
+      .then((rows) => {
+        state.fovRows = rows || [];
+        updateStatus();
+      })
+      .catch((e) => log(`Fetch session data failed: ${e.message}`));
+  }
+}
 log("Ready. Configure ranges and press Start.");
 updateStatus();
