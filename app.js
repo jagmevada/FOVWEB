@@ -22,6 +22,7 @@ const ui = {
   btnOk: $("btnOk"), btnNotOk: $("btnNotOk"),
   btnPrev: $("btnPrev"), btnNext: $("btnNext"),
   goAz: $("goAz"), goEl: $("goEl"), btnGoto: $("btnGoto"),
+  btnFetchSession: $("btnFetchSession"),
 
   btnExportJson: $("btnExportJson"),
   btnExportCsv: $("btnExportCsv"),
@@ -1090,6 +1091,63 @@ ui.btnGoto.addEventListener("click", async () => {
 
 ui.btnExportJson.addEventListener("click", exportJSON);
 ui.btnExportCsv.addEventListener("click", exportCSV);
+
+ui.btnFetchSession.addEventListener("click", async () => {
+  const sessionIdInput = ui.customSessionId ? ui.customSessionId.value.trim() : "";
+  if (!sessionIdInput) {
+    log("Enter a Session ID to fetch.");
+    return;
+  }
+  const sessionId = sessionIdInput.substring(0, 8);
+  log(`Fetching session: ${sessionId}...`);
+
+  try {
+    const session = await fetchSessionById(sessionId);
+    if (!session) {
+      log(`Session "${sessionId}" not found in Supabase.`);
+      return;
+    }
+
+    // Restore ranges from session
+    if (ui.azMin && session.az_min !== undefined) ui.azMin.value = session.az_min;
+    if (ui.azMax && session.az_max !== undefined) ui.azMax.value = session.az_max;
+    if (ui.elMin && session.el_min !== undefined) ui.elMin.value = session.el_min;
+    if (ui.elMax && session.el_max !== undefined) ui.elMax.value = session.el_max;
+    if (ui.stepDeg && session.step_deg !== undefined) ui.stepDeg.value = session.step_deg;
+
+    // Rebuild points with fetched ranges
+    rebuildPoints();
+
+    // Set session
+    setSessionId(sessionId);
+    if (ui.customSessionId) ui.customSessionId.value = sessionId;
+
+    // Fetch existing fov_data
+    state.fovRows = await fetchFovData(sessionId);
+    
+    // Find next uncaptured point index
+    const capturedKeys = new Set(state.fovRows.map(r => `${r.az_deg}|${r.el_deg}`));
+    let nextIdx = 0;
+    for (let i = 0; i < state.points.length; i++) {
+      const key = `${state.points[i].az}|${state.points[i].el}`;
+      if (!capturedKeys.has(key)) {
+        nextIdx = i;
+        break;
+      }
+      nextIdx = i + 1;
+    }
+    state.idx = Math.min(nextIdx, state.points.length - 1);
+
+    clearTelemetryUI();
+    setRetryEnabled(false);
+    setRunState("idle");
+    updateStatus();
+
+    log(`Session "${sessionId}" loaded. ${state.fovRows.length} captured points. Resuming at index ${state.idx + 1}.`);
+  } catch (e) {
+    log(`Fetch session failed: ${e.message}`);
+  }
+});
 
 ui.btnClear.addEventListener("click", () => {
   state.captured = [];
