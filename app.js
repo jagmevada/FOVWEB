@@ -952,7 +952,7 @@ function drawPolar3D() {
       },
       aspectmode: "cube",
       camera: {
-        eye: { x: 0.86, y: 0.70, z: 0.58 },
+        eye: { x: 1.083, y: 0.0, z: 0.626 },
         center: { x: 0, y: 0, z: 0 }
       }
     },
