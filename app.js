@@ -1,5 +1,5 @@
 // ==========================
-// FoV Mapping Webapp (v1)
+// FoV Mapping Webapp - VIEWER
 // Static GitHub Pages ready
 // ==========================
 
@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 const DEFAULT_SB_URL = "https://hsvctxongbvtnlofsazd.supabase.co";
 const DEFAULT_SB_KEY = "sb_publishable_aZWobGm_WPP-H0vxx7VILA_6qiAFtIq";
 const DEFAULT_DEVICE_ID = "dev1";
+const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
 const STORAGE_KEYS = {
   sessionId: "fov.sessionId",
 };
@@ -18,21 +19,11 @@ const ui = {
   stepDeg: $("stepDeg"), dwellMs: $("dwellMs"),
   customSessionId: $("customSessionId"),
 
-  btnStart: $("btnStart"), btnPause: $("btnPause"), btnStop: $("btnStop"),
-  btnOk: $("btnOk"), btnNotOk: $("btnNotOk"),
-  btnPrev: $("btnPrev"), btnNext: $("btnNext"),
-  goAz: $("goAz"), goEl: $("goEl"), btnGoto: $("btnGoto"),
   btnFetchSession: $("btnFetchSession"),
 
   btnExportJson: $("btnExportJson"),
   btnExportCsv: $("btnExportCsv"),
-  btnClear: $("btnClear"),
 
-  deviceMode: $("deviceMode"),
-  espBaseUrl: $("espBaseUrl"),
-  sbUrl: $("sbUrl"),
-  sbKey: $("sbKey"),
-  sbCmdTarget: $("sbCmdTarget"),
   sbDeviceId: $("sbDeviceId"),
 
   stState: $("stState"),
@@ -66,6 +57,7 @@ const state = {
   lastTelemetry: null,
   lastTelemetryError: "",
   fovRows: [],
+  autoRefreshTimer: null,
 };
 
 function nowISO() {
@@ -952,7 +944,7 @@ function drawPolar3D() {
       },
       aspectmode: "cube",
       camera: {
-        eye: { x: 0.86, y: 0.70, z: 0.58 },
+        eye: { x: 1.083, y: 0.0, z: 0.626 },
         center: { x: 0, y: 0, z: 0 }
       }
     },
@@ -998,95 +990,51 @@ function rebuildPoints() {
 }
 
 // =======================
-// UI bindings
+// Auto-refresh for viewer
 // =======================
 
-ui.btnStart.addEventListener("click", async () => {
-  rebuildPoints();
-  if (isSupabaseMode()) {
-    try {
-      const customId = ui.customSessionId ? ui.customSessionId.value.trim() : "";
-      if (!customId && state.currentSessionId) {
-        log(`Reusing session: ${state.currentSessionId.substring(0, 8)}`);
-        state.fovRows = await fetchFovData(state.currentSessionId);
-        updateStatus();
-      } else {
-        await createSession(getRanges());
-      }
-      setCaptureEnabled(false);
-    } catch (e) {
-      log(`Session create failed: ${e.message}`);
-      return;
+async function autoRefreshData() {
+  if (!state.currentSessionId) return;
+  
+  try {
+    const prevCount = state.fovRows.length;
+    state.fovRows = await fetchFovData(state.currentSessionId);
+    const newCount = state.fovRows.length;
+    
+    if (newCount !== prevCount) {
+      log(`Auto-refresh: ${newCount} points (${newCount - prevCount > 0 ? '+' : ''}${newCount - prevCount})`);
     }
+    
+    // Update index to latest point
+    state.idx = Math.max(0, state.fovRows.length - 1);
+    updateStatus();
+  } catch (e) {
+    // Silently fail on auto-refresh errors
   }
-  await stepToIndex(0, "Start");
-  await runLoop();
-});
+}
 
-ui.btnPause.addEventListener("click", () => {
-  if (state.runState === "running") setRunState("paused");
-  else if (state.runState === "paused") setRunState("running");
-  updateStatus();
-});
+function startAutoRefresh() {
+  stopAutoRefresh();
+  state.autoRefreshTimer = setInterval(autoRefreshData, AUTO_REFRESH_INTERVAL);
+  log("Auto-refresh started (5s interval)");
+}
 
-ui.btnStop.addEventListener("click", () => {
-  setRunState("stopped");
-  clearSessionId();
-  log("Stopped.");
-  updateStatus();
-});
+function stopAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+}
 
-ui.btnOk.addEventListener("click", async () => {
-  if (!state.points.length) rebuildPoints();
-  await capture("OK");
-});
-
-ui.btnNotOk.addEventListener("click", async () => {
-  if (!state.points.length) rebuildPoints();
-  await capture("NOT_OK");
-});
-
-ui.btnRetry.addEventListener("click", async () => {
-  await retryCurrentPointMove();
-});
+// =======================
+// UI bindings
+// =======================
 
 window.addEventListener("resize", () => {
   drawPolar();
   if (ui.polar3d && typeof Plotly !== "undefined") {
     Plotly.Plots.resize(ui.polar3d);
   }
-});
-
-ui.btnNext.addEventListener("click", async () => {
-  if (!state.points.length) rebuildPoints();
-  await stepToIndex(state.idx + 1, "Next");
-  setRunState("paused");
-  updateStatus();
-});
-
-ui.btnPrev.addEventListener("click", async () => {
-  if (!state.points.length) rebuildPoints();
-  await stepToIndex(state.idx - 1, "Previous");
-  setRunState("paused");
-  updateStatus();
-});
-
-ui.btnGoto.addEventListener("click", async () => {
-  if (!state.points.length) rebuildPoints();
-  const az = clampInt(ui.goAz.value, 0);
-  const el = clampInt(ui.goEl.value, 0);
-
-  // Find nearest point in grid
-  let best = 0;
-  let bestD = Infinity;
-  state.points.forEach((p, i) => {
-    const d = Math.abs(p.az - az) + Math.abs(p.el - el);
-    if (d < bestD) { bestD = d; best = i; }
-  });
-
-  await stepToIndex(best, "Goto");
-  setRunState("paused");
-  updateStatus();
 });
 
 ui.btnExportJson.addEventListener("click", exportJSON);
@@ -1125,39 +1073,21 @@ ui.btnFetchSession.addEventListener("click", async () => {
     // Fetch existing fov_data
     state.fovRows = await fetchFovData(sessionId);
     
-    // Find next uncaptured point index
-    const capturedKeys = new Set(state.fovRows.map(r => `${r.az_deg}|${r.el_deg}`));
-    let nextIdx = 0;
-    for (let i = 0; i < state.points.length; i++) {
-      const key = `${state.points[i].az}|${state.points[i].el}`;
-      if (!capturedKeys.has(key)) {
-        nextIdx = i;
-        break;
-      }
-      nextIdx = i + 1;
-    }
-    state.idx = Math.min(nextIdx, state.points.length - 1);
+    // Set index to latest captured point
+    state.idx = Math.max(0, state.fovRows.length - 1);
 
     clearTelemetryUI();
     setRetryEnabled(false);
-    setRunState("idle");
+    setRunState("viewing");
     updateStatus();
 
-    log(`Session "${sessionId}" loaded. ${state.fovRows.length} captured points. Resuming at index ${state.idx + 1}.`);
+    log(`Session "${sessionId}" loaded. ${state.fovRows.length} captured points.`);
+    
+    // Start auto-refresh
+    startAutoRefresh();
   } catch (e) {
     log(`Fetch session failed: ${e.message}`);
   }
-});
-
-ui.btnClear.addEventListener("click", () => {
-  state.captured = [];
-  state.fovRows = [];
-  state.lastTelemetryId = null;
-  state.lastTelemetry = null;
-  state.idx = 0;
-  setRunState("idle");
-  log("Cleared captured data.");
-  updateStatus();
 });
 
 // Initial
@@ -1169,14 +1099,27 @@ if (persistedSessionId) {
   if (ui.customSessionId && !ui.customSessionId.value.trim()) {
     ui.customSessionId.value = persistedSessionId;
   }
-  if (isSupabaseMode()) {
-    fetchFovData(persistedSessionId)
-      .then((rows) => {
-        state.fovRows = rows || [];
-        updateStatus();
-      })
-      .catch((e) => log(`Fetch session data failed: ${e.message}`));
-  }
+  // Auto-fetch persisted session on load
+  fetchSessionById(persistedSessionId)
+    .then((session) => {
+      if (session) {
+        if (ui.azMin && session.az_min !== undefined) ui.azMin.value = session.az_min;
+        if (ui.azMax && session.az_max !== undefined) ui.azMax.value = session.az_max;
+        if (ui.elMin && session.el_min !== undefined) ui.elMin.value = session.el_min;
+        if (ui.elMax && session.el_max !== undefined) ui.elMax.value = session.el_max;
+        if (ui.stepDeg && session.step_deg !== undefined) ui.stepDeg.value = session.step_deg;
+        rebuildPoints();
+      }
+      return fetchFovData(persistedSessionId);
+    })
+    .then((rows) => {
+      state.fovRows = rows || [];
+      state.idx = Math.max(0, state.fovRows.length - 1);
+      setRunState("viewing");
+      updateStatus();
+      startAutoRefresh();
+    })
+    .catch((e) => log(`Fetch session data failed: ${e.message}`));
 }
-log("Ready. Configure ranges and press Start.");
+log("Ready. Enter Session ID and click Fetch to view live data.");
 updateStatus();

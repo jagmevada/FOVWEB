@@ -11,97 +11,70 @@
     <div class="brand">
       <div class="dot"></div>
       <div>
-        <div class="title">Laser FoV Mapping</div>
+        <div class="title">Laser FoV Mapping — Viewer</div>
       </div>
     </div>
 
     <div class="top-actions">
       <button id="btnExportJson" class="btn ghost">Export JSON</button>
       <button id="btnExportCsv" class="btn ghost">Export CSV</button>
-      <button id="btnClear" class="btn danger ghost">Clear</button>
     </div>
   </header>
 
   <main class="grid">
     <!-- Left: Controls -->
     <section class="card">
-      <h2>Scan Setup</h2>
+      <h2>Session Viewer</h2>
 
       <div class="form-grid">
         <label>
-          Azimuth min (deg)
-          <input id="azMin" type="number" value="-80" step="1" />
-        </label>
-        <label>
-          Azimuth max (deg)
-          <input id="azMax" type="number" value="60" step="1" />
-        </label>
-        <label>
-          Elevation min (deg)
-          <input id="elMin" type="number" value="-15" step="1" />
-        </label>
-        <label>
-          Elevation max (deg)
-          <input id="elMax" type="number" value="85" step="1" />
-        </label>
-        <label>
-          Step size (deg)
-          <input id="stepDeg" type="number" value="5" step="1" />
-        </label>
-        <label>
-          Dwell / settle (ms)
-          <input id="dwellMs" type="number" value="250" step="10" />
-        </label>
-        <label>
-          DeviceID
-          <input id="sbDeviceId" type="text" value="dev1" />
-        </label>
-        <label>
-          Custom Session ID
+          Session ID
           <input id="customSessionId" type="text" placeholder="8-char session id" />
         </label>
       </div>
 
-      <div class="row gap">
-        <button id="btnStart" class="btn primary">Start</button>
-        <button id="btnPause" class="btn">Pause</button>
-        <button id="btnStop" class="btn danger">Stop</button>
-        <button id="btnFetchSession" class="btn">Fetch</button>
+      <div class="row gap" style="margin-top:10px;">
+        <button id="btnFetchSession" class="btn primary">Fetch</button>
       </div>
 
       <hr />
 
-      <h2>Capture</h2>
-      <div class="row gap">
-        <button id="btnOk" class="btn good">OK</button>
-        <button id="btnNotOk" class="btn bad">Not OK</button>
-      </div>
-
-      <p class="hint">
-        While scanning, mark each point:
-        <b>OK</b> = laser unobstructed,
-        <b>Not OK</b> = obstructed.
-      </p>
-
-      <hr />
-
-      <h2>Manual Step</h2>
-      <div class="row gap">
-        <button id="btnPrev" class="btn ghost">◀ Previous</button>
-        <button id="btnNext" class="btn ghost">Next ▶</button>
-      </div>
-
+      <h2>Session Info</h2>
       <div class="form-grid">
         <label>
-          Go Azimuth (deg)
-          <input id="goAz" type="number" value="0" step="1" />
+          Azimuth min (deg)
+          <input id="azMin" type="number" value="-80" step="1" disabled />
         </label>
         <label>
-          Go Elevation (deg)
-          <input id="goEl" type="number" value="0" step="1" />
+          Azimuth max (deg)
+          <input id="azMax" type="number" value="60" step="1" disabled />
+        </label>
+        <label>
+          Elevation min (deg)
+          <input id="elMin" type="number" value="-15" step="1" disabled />
+        </label>
+        <label>
+          Elevation max (deg)
+          <input id="elMax" type="number" value="85" step="1" disabled />
+        </label>
+        <label>
+          Step size (deg)
+          <input id="stepDeg" type="number" value="5" step="1" disabled />
         </label>
       </div>
-      <button id="btnGoto" class="btn">Go to Angle</button>
+
+      <hr />
+
+      <p class="hint">
+        <b>Auto-refresh:</b> Data updates every 5 seconds.<br/>
+        Enter a Session ID and click Fetch to view live measurements.
+      </p>
+
+      <!-- Hidden elements to keep JS references working -->
+      <input id="sbDeviceId" type="hidden" value="dev1" />
+      <input id="dwellMs" type="hidden" value="250" />
+      <input id="goAz" type="hidden" value="0" />
+      <input id="goEl" type="hidden" value="0" />
 
     </section>
 
@@ -180,7 +153,7 @@
         </table>
       </div>
       <p class="hint small">
-        Tip: You can still mark points manually (OK / Not OK) even when paused.
+        Viewing captured measurement data.
       </p>
     </section>
   </main>
