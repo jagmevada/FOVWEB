@@ -12,7 +12,6 @@
       <div class="dot"></div>
       <div>
         <div class="title">Laser FoV Mapping</div>
-        <div class="subtitle">Azimuth / Elevation scan + OK / Not OK capture</div>
       </div>
     </div>
 
@@ -31,11 +30,11 @@
       <div class="form-grid">
         <label>
           Azimuth min (deg)
-          <input id="azMin" type="number" value="-50" step="1" />
+          <input id="azMin" type="number" value="-80" step="1" />
         </label>
         <label>
           Azimuth max (deg)
-          <input id="azMax" type="number" value="50" step="1" />
+          <input id="azMax" type="number" value="60" step="1" />
         </label>
         <label>
           Elevation min (deg)
@@ -152,11 +151,11 @@
         <button id="btnRetry" class="btn danger ghost hidden" disabled>Retry</button>
       </div>
 
-      <h2>Polar Plot</h2>
-      <canvas id="polarCanvas" class="polar-canvas" aria-label="Polar plot"></canvas>
-
       <h2>3D Polar Plot</h2>
       <div id="polar3d" class="polar-3d" aria-label="3D polar plot"></div>
+
+      <h2>Polar Plot</h2>
+      <canvas id="polarCanvas" class="polar-canvas" aria-label="Polar plot"></canvas>
 
       <h2>Recent Log</h2>
       <div id="log" class="log"></div>

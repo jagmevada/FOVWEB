@@ -951,11 +951,20 @@ function drawPolar3D() {
       },
       aspectmode: "cube",
       camera: {
-        eye: { x: 1.55, y: 1.25, z: 1.05 }
+        eye: { x: 0.86, y: 0.70, z: 0.58 },
+        center: { x: 0, y: 0, z: 0 }
       }
     },
     showlegend: true,
-    legend: { font: { color: "#e7eef6" } }
+    legend: {
+      x: 0.98,
+      y: 0.98,
+      xanchor: "right",
+      yanchor: "top",
+      bgcolor: "rgba(0,0,0,0)",
+      borderwidth: 0,
+      font: { color: "#e7eef6" }
+    }
   };
 
   Plotly.react(el, data, layout, { displayModeBar: false, responsive: true });
